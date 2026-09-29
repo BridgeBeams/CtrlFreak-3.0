@@ -1,0 +1,5 @@
+<resources>
+    <style name="Theme.CtrlFreak" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="android:navigationBarColor">@android:color/black</item>
+    </style>
+</resources>

@@ -1,0 +1,25 @@
+{
+  "addr": ":8443",
+  "db_path": "ctrlfreak.db",
+
+  "_comment_tls": "Leave tls_cert/tls_key empty to use an auto-generated self-signed cert (accept the browser warning once). For a clean padlock and to let hosts run with -verify, point these at a real cert, e.g. from Let's Encrypt.",
+  "tls_cert": "",
+  "tls_key": "",
+
+  "_comment_jwt": "Set a stable random secret so logins survive restarts. Generate one with: openssl rand -hex 32. You can also pass it via the CTRLFREAK_JWT_SECRET environment variable instead of putting it on disk.",
+  "jwt_secret": "",
+  "token_ttl_hours": 168,
+
+  "_comment_admin": "The first admin is created only if the user table is empty. Prefer passing the password via CTRLFREAK_ADMIN_PASS on first launch rather than storing it here.",
+  "admin_user": "wade",
+  "admin_pass": "",
+
+  "_comment_sessions": "How many remote screens ONE controller can view at once. NOT a limit on how many machines you register (that is unlimited). Raise it if you want more tiles open at the same time; each open screen uses bandwidth and CPU.",
+  "max_sessions_per_controller": 10,
+
+  "_comment_ice": "STUN lets peers find each other for a direct connection. TURN relays the encrypted stream when a firewall blocks the direct path (the strict-corporate case). Add your own TURN server here once you stand one up; see ARCHITECTURE.md.",
+  "ice_servers": [
+    { "urls": ["stun:stun.l.google.com:19302"] },
+    { "urls": ["stun:stun1.l.google.com:19302"] }
+  ]
+}

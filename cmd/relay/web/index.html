@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>CtrlFreak</title>
+<link rel="icon" type="image/png" href="favicon.png">
+<link rel="apple-touch-icon" href="favicon.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- ============ LOGIN ============ -->
+<div id="login-view" class="view">
+  <div class="login-card">
+    <div class="brand"><span class="brand-mark">&#9678;</span> CtrlFreak</div>
+    <p class="tagline">Remote control, on your terms.</p>
+    <form id="login-form">
+      <input id="login-user" type="text" placeholder="Username" autocomplete="username" required>
+      <input id="login-pass" type="password" placeholder="Password" autocomplete="current-password" required>
+      <button type="submit">Sign in</button>
+      <div id="login-error" class="error"></div>
+    </form>
+  </div>
+</div>
+
+<!-- ============ FORCED PASSWORD CHANGE ============ -->
+<div id="change-view" class="view hidden">
+  <div class="login-card">
+    <div class="brand"><span class="brand-mark">&#9678;</span> CtrlFreak</div>
+    <p class="tagline">Set a new password to continue.</p>
+    <form id="change-form">
+      <input id="change-old" type="password" placeholder="Current / temporary password" required>
+      <input id="change-new" type="password" placeholder="New password (min 8 chars)" required>
+      <input id="change-new2" type="password" placeholder="Confirm new password" required>
+      <button type="submit">Update password</button>
+      <div id="change-error" class="error"></div>
+    </form>
+  </div>
+</div>
+
+<!-- ============ MAIN ============ -->
+<div id="main-view" class="view hidden">
+  <header class="topbar">
+    <div class="brand small"><span class="brand-mark">&#9678;</span> CtrlFreak</div>
+    <div class="topbar-right">
+      <span id="who"></span>
+      <button id="nav-devices" class="tab active">Devices</button>
+      <button id="nav-files" class="tab">Files</button>
+      <button id="nav-admin" class="tab hidden">Admin</button>
+      <button id="nav-account" class="ghost">Account</button>
+      <button id="logout" class="ghost">Sign out</button>
+    </div>
+  </header>
+
+  <!-- DEVICES / SESSIONS -->
+  <section id="devices-panel" class="panel">
+    <div class="sidebar">
+      <h3>Your machines <span id="session-count" class="pill">0/3</span></h3>
+      <ul id="device-list" class="device-list"></ul>
+      <p class="hint" id="device-hint">No hosts online yet. Start the CtrlFreak host agent on a machine and it will appear here.</p>
+    </div>
+    <div id="session-grid" class="session-grid"></div>
+  </section>
+
+  <!-- FILES (dual-pane, machine to machine) -->
+  <section id="files-panel" class="panel hidden filemgr">
+    <div class="fm-pane" data-side="L">
+      <div class="fm-head">
+        <select class="fm-device" title="Machine"></select>
+        <button class="fm-drives" title="Drives / home">Drives</button>
+        <button class="fm-up" title="Up one folder">Up</button>
+        <button class="fm-refresh" title="Refresh">&#8635;</button>
+        <button class="fm-copy" title="Copy the selected file to the other side">Copy &#8594;</button>
+      </div>
+      <div class="fm-path"></div>
+      <div class="fm-list"></div>
+      <div class="fm-xfer"></div>
+    </div>
+    <div class="fm-pane" data-side="R">
+      <div class="fm-head">
+        <select class="fm-device" title="Machine"></select>
+        <button class="fm-drives" title="Drives / home">Drives</button>
+        <button class="fm-up" title="Up one folder">Up</button>
+        <button class="fm-refresh" title="Refresh">&#8635;</button>
+        <button class="fm-copy" title="Copy the selected file to the other side">&#8592; Copy</button>
+      </div>
+      <div class="fm-path"></div>
+      <div class="fm-list"></div>
+      <div class="fm-xfer"></div>
+    </div>
+  </section>
+
+  <!-- ADMIN -->
+  <section id="admin-panel" class="panel hidden">
+    <div class="admin-wrap">
+      <div class="admin-block">
+        <h3>Create user</h3>
+        <form id="create-user-form" class="row-form">
+          <input id="cu-name" placeholder="username" required>
+          <input id="cu-pass" placeholder="temp password (min 8)" required>
+          <label class="chk"><input id="cu-admin" type="checkbox"> admin</label>
+          <button type="submit">Create</button>
+        </form>
+        <div id="create-user-msg" class="msg"></div>
+      </div>
+
+      <div class="admin-block">
+        <h3>Users</h3>
+        <table id="users-table" class="table">
+          <thead><tr><th>User</th><th>Role</th><th>Status</th><th>Actions</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+
+      <div class="admin-block">
+        <h3>Access log</h3>
+        <p class="hint">Every sign in, session, and admin action is recorded here. This is deliberate: CtrlFreak keeps an honest record of who accessed what.</p>
+        <table id="audit-table" class="table">
+          <thead><tr><th>When</th><th>Who</th><th>Action</th><th>Target</th><th>Detail</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+</div>
+
+<!-- Template for one session tile -->
+<template id="session-tile-tpl">
+  <div class="tile">
+    <div class="tile-bar">
+      <span class="tile-name"></span>
+      <span class="tile-stat">connecting...</span>
+      <span class="spacer"></span>
+      <select class="q-scale hidden" title="Resolution scale">
+        <option value="100" selected>100%</option>
+      </select>
+      <select class="q-fps" title="Frames per second">
+        <option value="30">30 fps</option>
+        <option value="15" selected>15 fps</option>
+        <option value="8">8 fps</option>
+        <option value="4">4 fps</option>
+      </select>
+      <button class="tile-cmd" title="Run a command on the remote machine">Cmd</button>
+      <button class="tile-clip" title="Send your clipboard to the remote machine">Clip</button>
+      <button class="tile-files" title="File transfer">Files</button>
+      <button class="tile-full" title="Fullscreen (click again to exit)">&#9974;</button>
+      <button class="tile-close" title="End session">&times;</button>
+    </div>
+    <div class="tile-stage">
+      <canvas class="screen" tabindex="0"></canvas>
+      <div class="drop-hint">Drop files here to send to the remote machine</div>
+    </div>
+    <div class="tile-files-drawer hidden">
+      <div class="files-head">
+        <span>File transfer</span>
+        <button class="files-close">close</button>
+      </div>
+      <div class="files-body">
+        <div class="files-up">
+          <div class="files-label">Send to remote (drag onto the screen, or pick):</div>
+          <input type="file" class="file-input" multiple>
+        </div>
+        <div class="remote-list">Remote files load when you open this panel.</div>
+        <div class="xfer-list"></div>
+      </div>
+    </div>
+  </div>
+</template>
+
+<!-- Account: change-your-own-password modal (works for every user, admin included) -->
+<div id="account-modal" class="modal hidden">
+  <div class="modal-card">
+    <div class="modal-head">
+      <span>Change your password</span>
+      <button id="account-close" class="files-close">close</button>
+    </div>
+    <form id="account-form">
+      <input id="acct-old" type="password" placeholder="Current password" required>
+      <input id="acct-new" type="password" placeholder="New password (min 8 chars)" required>
+      <input id="acct-new2" type="password" placeholder="Confirm new password" required>
+      <button type="submit">Update password</button>
+      <div id="account-msg" class="msg"></div>
+    </form>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
