@@ -20,7 +20,7 @@
 ; GitHub builds this for you (see .github/workflows/build.yml).
 
 #define AppName "CtrlFreak"
-#define AppVersion "3.0.0"
+#define AppVersion "3.0.1"
 #define DefaultHubWs "wss://hub.ctrlfreak.us/ws"
 #define DefaultHubWeb "https://hub.ctrlfreak.us/"
 
