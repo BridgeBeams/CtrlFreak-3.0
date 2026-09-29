@@ -35,6 +35,10 @@ type Injector interface {
 	TypeText(s string)
 }
 
+// clipMu serializes OS clipboard access so the periodic reader and an on-demand
+// write from the controller never touch the clipboard at the same time.
+var clipMu sync.Mutex
+
 // Agent owns the signaling connection and all active sessions.
 type Agent struct {
 	relayURL string
@@ -324,11 +328,19 @@ func (s *hostSession) applyInput(dm protocol.DataMsg) {
 		s.mu.Unlock()
 	case protocol.DataClipboardRx:
 		// Controller set our clipboard. Remember the text so our watcher does
-		// not immediately echo it back.
+		// not immediately echo it back. Do the actual Win32 clipboard write on a
+		// separate goroutine (serialized with the reader): clipboard calls can
+		// stall in a windowless elevated process, and this handler also carries
+		// mouse and keyboard, so a blocking write here would freeze all input.
 		s.mu.Lock()
 		s.lastClip = dm.Text
 		s.mu.Unlock()
-		writeClipboard(dm.Text)
+		text := dm.Text
+		go func() {
+			clipMu.Lock()
+			writeClipboard(text)
+			clipMu.Unlock()
+		}()
 	case protocol.DataExec:
 		go s.runExec(dm.Cmd)
 	}
@@ -346,7 +358,9 @@ func (s *hostSession) clipboardWatch() {
 			return
 		case <-t.C:
 		}
+		clipMu.Lock()
 		text, ok := readClipboard()
+		clipMu.Unlock()
 		if !ok || text == "" {
 			continue
 		}
