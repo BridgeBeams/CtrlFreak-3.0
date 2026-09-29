@@ -52,6 +52,7 @@ data class DataMsg(
     @SerializedName("w") var w: Int = 0,
     @SerializedName("h") var h: Int = 0,
     @SerializedName("key") var key: Boolean = false,
+    @SerializedName("parts") var parts: Int = 0,
     @SerializedName("x") var x: Int = 0,
     @SerializedName("y") var y: Int = 0,
     @SerializedName("mx") var mx: Int = 0,

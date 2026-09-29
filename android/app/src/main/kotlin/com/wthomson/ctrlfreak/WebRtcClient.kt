@@ -41,10 +41,12 @@ class WebRtcClient(
     // last header we saw so the following binary message is interpreted with it.
     private var pendingHeader: DataMsg? = null
 
-    // Quality prefs pushed to the host once ctrl opens.
+    // Quality prefs pushed to the host once ctrl opens. Full resolution (scale
+    // 100) keeps the remote screen legible on the Fold; the host chunks large
+    // frames and we reassemble them below.
     var fps = 15
-    var scale = 60
-    var quality = 60
+    var scale = 100
+    var quality = 70
 
     // Declared before init so it is available when the peer connection is created.
     private val observer = object : PeerConnection.Observer {
@@ -157,18 +159,37 @@ class WebRtcClient(
             "video" -> {
                 screen = dc
                 dc.registerObserver(object : DataChannel.Observer {
+                    // A frame arrives as a JSON header (with "parts": N) followed
+                    // by N binary chunks. At full resolution a JPEG exceeds the
+                    // data-channel message limit, so the host splits it; we collect
+                    // the chunks and only decode once we have the whole frame.
+                    private val parts = ArrayList<ByteArray>()
+                    private var need = 0
                     override fun onBufferedAmountChange(previousAmount: Long) {}
                     override fun onStateChange() {}
                     override fun onMessage(buffer: DataChannel.Buffer) {
                         if (!buffer.binary) {
                             val text = readText(buffer.data)
-                            pendingHeader = try { gson.fromJson(text, DataMsg::class.java) } catch (e: Exception) { null }
-                        } else {
-                            val bytes = ByteArray(buffer.data.remaining())
-                            buffer.data.get(bytes)
-                            cb.onFrame(bytes)
-                            pendingHeader = null
+                            val hdr = try { gson.fromJson(text, DataMsg::class.java) } catch (e: Exception) { null }
+                            pendingHeader = hdr
+                            parts.clear()
+                            need = if (hdr != null && hdr.parts > 0) hdr.parts else 1
+                            return
                         }
+                        if (pendingHeader == null) return
+                        val bytes = ByteArray(buffer.data.remaining())
+                        buffer.data.get(bytes)
+                        parts.add(bytes)
+                        if (parts.size < need) return
+                        var total = 0
+                        for (p in parts) total += p.size
+                        val full = ByteArray(total)
+                        var off = 0
+                        for (p in parts) { System.arraycopy(p, 0, full, off, p.size); off += p.size }
+                        cb.onFrame(full)
+                        pendingHeader = null
+                        parts.clear()
+                        need = 0
                     }
                 })
             }
