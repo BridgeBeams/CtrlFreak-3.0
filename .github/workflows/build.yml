@@ -1,0 +1,76 @@
+name: Build CtrlFreak
+
+# Builds the single .exe files in the cloud so you never build locally.
+#
+# - On every push: builds and attaches the exe files as downloadable "artifacts"
+#   (found under the run's summary page; they download as a .zip).
+# - When you publish a Release (or push a tag like v1.0): builds and attaches the
+#   raw .exe files directly to that Release, so they download as single files you
+#   can drop on Google Drive, email, or run directly.
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  release:
+    types: [published]
+  workflow_dispatch: {}
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    permissions:
+      contents: write   # lets the release step attach the .exe
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+
+      - name: Build the host exe (single exe, no cgo)
+        shell: pwsh
+        env:
+          CGO_ENABLED: "0"
+          GOOS: windows
+          GOARCH: amd64
+        run: |
+          go mod tidy
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          # Embed the app icon into the host exe (Windows resource).
+          go run github.com/akavel/rsrc@v0.10.2 -ico branding/CtrlFreak.ico -arch amd64 -o cmd/host/rsrc.syso
+          # NOTE: the relay (server) is NOT built here. It runs only on the hub
+          # (the droplet at hub.ctrlfreak.us), built there from source. Endpoint
+          # machines must never receive a relay exe -- shipping one lets someone
+          # accidentally launch a second, empty server.
+          go build -ldflags "-s -w -H=windowsgui" -o dist/ctrlfreak-host.exe  ./cmd/host
+          Remove-Item cmd/host/rsrc.syso -ErrorAction SilentlyContinue
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
+
+      - name: Build the unified installer (single CtrlFreak-Setup.exe)
+        shell: pwsh
+        run: |
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" installer\ctrlfreak-setup.iss
+          Copy-Item installer\Output\CtrlFreak-Setup.exe dist\CtrlFreak-Setup.exe
+
+      - name: Upload build artifacts (for ordinary pushes)
+        uses: actions/upload-artifact@v4
+        with:
+          name: ctrlfreak-windows
+          path: |
+            dist/CtrlFreak-Setup.exe
+            dist/ctrlfreak-host.exe
+
+      - name: Attach the installer to the Release (on a tag or published release)
+        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/CtrlFreak-Setup.exe
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
