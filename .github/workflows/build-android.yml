@@ -1,0 +1,66 @@
+name: Build CtrlFreak Android APK
+
+# Builds the phone app in the cloud and hands you the .apk to sideload on your
+# Fold. Same idea as the Windows build: publish a release and download the file.
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+    paths:
+      - "android/**"
+      - ".github/workflows/build-android.yml"
+  release:
+    types: [published]
+  workflow_dispatch: {}
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # lets the release step attach the .apk
+    defaults:
+      run:
+        working-directory: android
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          # Install only what we need. The action's default package list includes
+          # the obsolete "tools" package, which Google removed and which makes the
+          # step fail; listing packages explicitly avoids that.
+          packages: 'platform-tools platforms;android-34 build-tools;34.0.0'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.9"
+
+      - name: Build debug APK
+        run: gradle assembleDebug --no-daemon --stacktrace
+
+      - name: Rename APK
+        run: cp app/build/outputs/apk/debug/app-debug.apk CtrlFreak.apk
+
+      - name: Upload APK artifact (for ordinary pushes)
+        uses: actions/upload-artifact@v4
+        with:
+          name: ctrlfreak-android
+          path: android/CtrlFreak.apk
+
+      - name: Attach APK to the Release (on a tag or published release)
+        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: android/CtrlFreak.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
