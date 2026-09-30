@@ -397,29 +397,30 @@ class Session {
     const tid = crypto.randomUUID();
     const row = this.xferRow(tid, file.name, 'to remote');
     this.sendFileMsg({type: 'offer', tid, name: file.name, size: file.size, dir: 'upload'});
-    const CHUNK = 64 * 1024;
+    // 16KB stays well under the data-channel's max message size (64KB was right
+    // at the edge and the first chunk was silently failing). Poll-based
+    // backpressure avoids the bufferedAmountLow handler ever deadlocking.
+    const CHUNK = 16 * 1024;
     let sent = 0;
-    const reader = file.stream().getReader();
-    // Simple backpressure: pause when the channel buffer gets large.
-    const drain = () => new Promise(res => {
-      if (this.files.bufferedAmount < 4 * 1024 * 1024) return res();
-      this.files.onbufferedamountlow = () => { this.files.onbufferedamountlow = null; res(); };
-      this.files.bufferedAmountLowThreshold = 1 * 1024 * 1024;
-    });
-    while (true) {
-      const {done, value} = await reader.read();
-      if (done) break;
-      for (let off = 0; off < value.length; off += CHUNK) {
-        const slice = value.subarray(off, off + CHUNK);
-        this.sendFileMsg({type: 'chunk', tid, offset: sent});
-        this.files.send(slice);
-        sent += slice.length;
-        row.set(sent / file.size);
-        await drain();
+    try {
+      const reader = file.stream().getReader();
+      while (true) {
+        const {done, value} = await reader.read();
+        if (done) break;
+        for (let off = 0; off < value.length; off += CHUNK) {
+          while (this.files.bufferedAmount > 4 * 1024 * 1024) { await new Promise(r => setTimeout(r, 20)); }
+          this.sendFileMsg({type: 'chunk', tid, offset: sent});
+          this.files.send(value.subarray(off, off + CHUNK));
+          sent += Math.min(CHUNK, value.length - off);
+          row.set(sent / file.size);
+        }
       }
+      this.sendFileMsg({type: 'done', tid});
+      row.set(1); row.label('sent'); row.done();
+    } catch (e) {
+      row.label('failed'); row.done();
+      alert('Upload failed: ' + (e && e.message ? e.message : e));
     }
-    this.sendFileMsg({type: 'done', tid});
-    row.set(1); row.label('sent'); row.done();
   }
 
   onFileMessage(e) {
@@ -899,14 +900,14 @@ class FileConn {
   }
 
   beginUpload(tid, name, size, destDir) { this.sendFiles({type: 'offer', tid, name, size, dir: 'upload', dest: destDir || ''}); }
+  // Split any chunk into 16KB pieces (well under the data-channel message limit)
+  // and use poll-based backpressure so it can't deadlock.
   async uploadChunk(tid, chunk) {
-    this.sendFiles({type: 'chunk', tid});
-    this.files.send(chunk);
-    if (this.files.bufferedAmount > 4 * 1024 * 1024) {
-      await new Promise(res => {
-        this.files.bufferedAmountLowThreshold = 1 * 1024 * 1024;
-        this.files.onbufferedamountlow = () => { this.files.onbufferedamountlow = null; res(); };
-      });
+    const CH = 16 * 1024;
+    for (let off = 0; off < chunk.length; off += CH) {
+      while (this.files && this.files.bufferedAmount > 4 * 1024 * 1024) { await new Promise(r => setTimeout(r, 20)); }
+      this.sendFiles({type: 'chunk', tid});
+      this.files.send(chunk.subarray(off, off + CH));
     }
   }
   endUpload(tid) { this.sendFiles({type: 'done', tid}); }
@@ -914,15 +915,13 @@ class FileConn {
   async uploadFile(file, destDir, onProgress) {
     const tid = crypto.randomUUID();
     this.beginUpload(tid, file.name, file.size, destDir);
-    const reader = file.stream().getReader(); const CH = 64 * 1024; let sent = 0;
+    const reader = file.stream().getReader(); let sent = 0;
     while (true) {
       const {done, value} = await reader.read();
       if (done) break;
-      for (let off = 0; off < value.length; off += CH) {
-        await this.uploadChunk(tid, value.subarray(off, off + CH));
-        sent += Math.min(CH, value.length - off);
-        if (onProgress && file.size) onProgress(sent / file.size);
-      }
+      await this.uploadChunk(tid, value);
+      sent += value.length;
+      if (onProgress && file.size) onProgress(sent / file.size);
     }
     this.endUpload(tid);
   }
