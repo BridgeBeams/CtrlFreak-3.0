@@ -71,12 +71,19 @@ class RemoteView @JvmOverloads constructor(
     private var prevCx = 0f
     private var prevCy = 0f
     private var prevSpan = 0f
+    private var startCy = 0f
+    private var startSpan = 0f
     private var scrollAnchorY = 0f
+    // 0 = undecided, 1 = zoom/pan, 2 = scroll. Locked once decided, per gesture.
+    private var twoMode = 0
 
     private val density = resources.displayMetrics.density
     private val slop = ViewConfiguration.get(context).scaledTouchSlop.toFloat()
     private val doubleSlop = 40f * density
-    private val pinchSlop = 14f * density
+    // Zoom wins ties and triggers on less movement than scroll, so a pinch is
+    // read as a pinch, not a scroll.
+    private val zoomTrigger = 10f * density
+    private val scrollTrigger = 30f * density
     private val longPress = Runnable {
         if (!moved && !dragging && !multi) {
             longPressed = true
@@ -178,19 +185,29 @@ class RemoteView @JvmOverloads constructor(
                 if (dragging) { toRemote(lastVX, lastVY)?.let { l.onDragEnd(it.first, it.second) }; dragging = false }
                 multi = true
                 if (event.pointerCount >= 2) {
-                    prevCx = cx(event); prevCy = cy(event); prevSpan = span(event); scrollAnchorY = prevCy
+                    prevCx = cx(event); prevCy = cy(event); prevSpan = span(event)
+                    startCy = prevCy; startSpan = prevSpan; scrollAnchorY = prevCy; twoMode = 0
                 }
             }
             MotionEvent.ACTION_MOVE -> {
                 if (multi) {
                     if (event.pointerCount >= 2) {
                         val ncx = cx(event); val ncy = cy(event); val nspan = span(event)
-                        val pinching = prevSpan > 0f && abs(nspan - prevSpan) > pinchSlop
-                        if (zoom > 1f || pinching) {
+                        // Once zoomed in, two fingers always zoom (pinch) + pan.
+                        // At 1x, decide zoom vs scroll from total movement since
+                        // the fingers landed, and lock it for the rest of the
+                        // gesture so it can't flip-flop.
+                        if (zoom <= 1f && twoMode == 0) {
+                            val spanAcc = abs(nspan - startSpan)
+                            val scrollAcc = abs(ncy - startCy)
+                            if (spanAcc > zoomTrigger && spanAcc >= scrollAcc) twoMode = 1
+                            else if (scrollAcc > scrollTrigger) twoMode = 2
+                        }
+                        if (zoom > 1f || twoMode == 1) {
                             if (prevSpan > 0f && nspan > 0f) zoomAround(ncx, ncy, nspan / prevSpan)
                             panX += (ncx - prevCx); panY += (ncy - prevCy)
                             clampPan(); invalidate()
-                        } else if (abs(ncy - scrollAnchorY) > 24f) {
+                        } else if (twoMode == 2 && abs(ncy - scrollAnchorY) > 24f) {
                             l.onScroll(if (ncy > scrollAnchorY) -1 else 1); scrollAnchorY = ncy
                         }
                         prevCx = ncx; prevCy = ncy; prevSpan = nspan
