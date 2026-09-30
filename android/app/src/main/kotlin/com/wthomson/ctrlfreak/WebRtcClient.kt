@@ -25,7 +25,7 @@ class WebRtcClient(
     private val cb: Callbacks,
 ) {
     interface Callbacks {
-        fun onScreenInfo(w: Int, h: Int)
+        fun onScreenInfo(w: Int, h: Int, monitors: List<MonitorDim>)
         fun onFrame(jpeg: ByteArray)
         fun onState(state: String)
     }
@@ -136,6 +136,7 @@ class WebRtcClient(
     fun scroll(dx: Int, dy: Int) = sendCtrl(DataMsg(type = DM.MOUSE_SCROLL, dx = dx, dy = dy))
     fun key(code: String, down: Boolean) = sendCtrl(DataMsg(type = DM.KEY, code = code, down = down))
     fun typeText(text: String) = sendCtrl(DataMsg(type = DM.TYPE_TEXT, text = text))
+    fun selectMonitor(index: Int) = sendCtrl(DataMsg(type = DM.SELECT_MON, mon = index))
 
     // ---- channel wiring ----
 
@@ -152,7 +153,7 @@ class WebRtcClient(
                         if (buffer.binary) return
                         val text = readText(buffer.data)
                         val m = try { gson.fromJson(text, DataMsg::class.java) } catch (e: Exception) { return }
-                        if (m.type == DM.SCREEN_INFO) cb.onScreenInfo(m.w, m.h)
+                        if (m.type == DM.SCREEN_INFO) cb.onScreenInfo(m.w, m.h, m.monitors ?: emptyList())
                     }
                 })
             }

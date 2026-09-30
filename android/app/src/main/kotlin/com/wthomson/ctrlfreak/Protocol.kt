@@ -51,6 +51,8 @@ data class DataMsg(
     @SerializedName("type") var type: String = "",
     @SerializedName("w") var w: Int = 0,
     @SerializedName("h") var h: Int = 0,
+    @SerializedName("monitors") var monitors: List<MonitorDim>? = null,
+    @SerializedName("mon") var mon: Int = 0,
     @SerializedName("key") var key: Boolean = false,
     @SerializedName("parts") var parts: Int = 0,
     @SerializedName("x") var x: Int = 0,
@@ -66,6 +68,15 @@ data class DataMsg(
     @SerializedName("quality") var quality: Int = 0,
     @SerializedName("scale") var scale: Int = 0,
     @SerializedName("text") var text: String? = null,
+)
+
+/** One display on the host, mirrors protocol.MonitorDim. */
+data class MonitorDim(
+    @SerializedName("index") val index: Int = 0,
+    @SerializedName("w") val w: Int = 0,
+    @SerializedName("h") val h: Int = 0,
+    @SerializedName("x") val x: Int = 0,
+    @SerializedName("y") val y: Int = 0,
 )
 
 // Signal type constants.
@@ -93,6 +104,7 @@ object DM {
     const val KEY = "key"
     const val TYPE_TEXT = "type_text"
     const val SET_QUALITY = "set_quality"
+    const val SELECT_MON = "select_mon"
 }
 
 // Command names.

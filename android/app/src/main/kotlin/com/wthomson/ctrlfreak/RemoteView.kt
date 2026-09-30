@@ -96,6 +96,12 @@ class RemoteView @JvmOverloads constructor(
         isFocusableInTouchMode = true
     }
 
+    /** Reset zoom and pan to the default fit. Used when switching monitors. */
+    fun resetView() {
+        zoom = 1f; panX = 0f; panY = 0f
+        invalidate()
+    }
+
     /** Set the current frame. Call on the main thread. */
     fun setFrame(bmp: Bitmap) {
         bitmap = bmp

@@ -44,6 +44,9 @@ class SessionActivity : AppCompatActivity(), SignalClient.Listener, WebRtcClient
     private var prevKbText = ""
     private lateinit var hostId: String
     private lateinit var hostName: String
+    private var monitors: List<MonitorDim> = emptyList()
+    private var currentMon = 0
+    private lateinit var screenBtn: Button
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -73,6 +76,10 @@ class SessionActivity : AppCompatActivity(), SignalClient.Listener, WebRtcClient
             gravity = Gravity.CENTER_VERTICAL
         }
         btnRow.addView(btn("⌨") { toggleKeyboard() })                          // keyboard
+        // Monitor switcher. Hidden until the host reports more than one screen.
+        screenBtn = btn("🖥") { pickMonitor() }
+        screenBtn.visibility = View.GONE
+        btnRow.addView(screenBtn)
         btnRow.addView(btn("↻") { confirmCommand(Cmd.RESTART_AGENT) })         // restart agent
         btnRow.addView(btn("⏻") { confirmCommand(Cmd.REBOOT) })               // reboot PC
         btnRow.addView(btn("R-clk") { rightClick() })                          // right click
@@ -130,8 +137,33 @@ class SessionActivity : AppCompatActivity(), SignalClient.Listener, WebRtcClient
 
     // ---- WebRtc callbacks (may arrive off the main thread) ----
 
-    override fun onScreenInfo(w: Int, h: Int) = runOnUiThread {
+    override fun onScreenInfo(w: Int, h: Int, mons: List<MonitorDim>) = runOnUiThread {
         remote.remoteW = w; remote.remoteH = h
+        monitors = mons
+        if (currentMon >= mons.size) currentMon = 0
+        // Show the switcher only when there is more than one screen to switch to.
+        screenBtn.visibility = if (mons.size > 1) View.VISIBLE else View.GONE
+    }
+
+    // List every host screen and switch to the one tapped. The host maps clicks
+    // against the selected monitor's pixel size, so we retarget the view's remote
+    // dimensions to match, otherwise taps land on the wrong screen after a switch.
+    private fun pickMonitor() {
+        if (monitors.size < 2) return
+        val labels = monitors.mapIndexed { i, m -> "Screen ${i + 1}  (${m.w}×${m.h})" }.toTypedArray()
+        AlertDialog.Builder(this)
+            .setTitle("View which screen?")
+            .setSingleChoiceItems(labels, currentMon) { dlg, which ->
+                val m = monitors[which]
+                currentMon = which
+                remote.remoteW = m.w; remote.remoteH = m.h
+                remote.resetView()
+                client.selectMonitor(which)
+                Toast.makeText(this, "Switched to Screen ${which + 1}.", Toast.LENGTH_SHORT).show()
+                dlg.dismiss()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
     }
 
     override fun onFrame(jpeg: ByteArray) {
