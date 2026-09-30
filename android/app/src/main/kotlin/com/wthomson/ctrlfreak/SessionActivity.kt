@@ -136,9 +136,17 @@ class SessionActivity : AppCompatActivity(), SignalClient.Listener, WebRtcClient
 
     // ---- touch -> input ----
 
-    override fun onDown(x: Int, y: Int) { lastX = x; lastY = y; client.mouseButton("left", true, x, y) }
-    override fun onMove(x: Int, y: Int) { lastX = x; lastY = y; client.mouseMove(x, y) }
-    override fun onUp(x: Int, y: Int) { client.mouseButton("left", false, x, y) }
+    override fun onLeftClick(x: Int, y: Int) {
+        lastX = x; lastY = y
+        client.mouseButton("left", true, x, y); client.mouseButton("left", false, x, y)
+    }
+    override fun onRightClick(x: Int, y: Int) {
+        lastX = x; lastY = y
+        client.mouseButton("right", true, x, y); client.mouseButton("right", false, x, y)
+    }
+    override fun onDragStart(x: Int, y: Int) { lastX = x; lastY = y; client.mouseButton("left", true, x, y) }
+    override fun onDragMove(x: Int, y: Int) { lastX = x; lastY = y; client.mouseMove(x, y) }
+    override fun onDragEnd(x: Int, y: Int) { client.mouseButton("left", false, x, y) }
     override fun onScroll(dy: Int) { client.scroll(0, dy) }
 
     private fun rightClick() {
@@ -195,9 +203,10 @@ class SessionActivity : AppCompatActivity(), SignalClient.Listener, WebRtcClient
     }
 
     private fun btn(label: String, onClick: () -> Unit) = Button(this).apply {
-        text = label; textSize = 12f
-        setPadding(dp(8), dp(4), dp(8), dp(4))
-        minWidth = 0; minimumWidth = 0
+        text = label; textSize = 16f
+        setPadding(dp(16), dp(10), dp(16), dp(10))
+        minWidth = dp(52); minimumWidth = dp(52)
+        minHeight = dp(48); minimumHeight = dp(48)
         setOnClickListener { onClick() }
     }
 
