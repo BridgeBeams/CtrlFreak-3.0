@@ -156,6 +156,7 @@ class Session {
     this.ctrl = null; this.screen = null; this.files = null;
     this.pendingFrame = null;
     this.remoteW = 0; this.remoteH = 0;
+    this.monitors = []; this.monitor = 0;
     this.transfers = new Map(); // tid -> {meta, chunks, received}
     this.buildTile();
   }
@@ -251,6 +252,8 @@ class Session {
       if (m.type === 'screen_info') {
         this.remoteW = m.w; this.remoteH = m.h;
         this.canvas.width = m.w; this.canvas.height = m.h;
+        this.monitors = Array.isArray(m.monitors) ? m.monitors : [];
+        this.buildMonitorPicker();
       } else if (m.type === 'clipboard_tx') {
         // Remote clipboard changed. Mirror it into the local clipboard when we
         // have focus (browsers block clipboard writes otherwise); always keep
@@ -266,6 +269,37 @@ class Session {
     ch.onopen = () => { this.sendQuality({}); }; // push initial quality prefs
   }
   sendCtrl(obj) { if (this.ctrl && this.ctrl.readyState === 'open') this.ctrl.send(JSON.stringify(obj)); }
+
+  // Fill the monitor dropdown from the host's monitor list. Hidden entirely when
+  // the remote machine has only one screen, shown as "Screen 1 / Screen 2 / ..."
+  // otherwise (any number of screens).
+  buildMonitorPicker() {
+    const sel = this.el.querySelector('.q-mon');
+    if (!sel) return;
+    if (this.monitors.length < 2) { sel.classList.add('hidden'); return; }
+    sel.innerHTML = '';
+    this.monitors.forEach((mon, i) => {
+      const o = document.createElement('option');
+      o.value = String(i);
+      o.textContent = `Screen ${i + 1} (${mon.w}×${mon.h})`;
+      if (i === this.monitor) o.selected = true;
+      sel.appendChild(o);
+    });
+    sel.classList.remove('hidden');
+    sel.onchange = (e) => this.selectMonitor(+e.target.value);
+  }
+
+  // Switch the streamed monitor. The host maps clicks against the SELECTED
+  // monitor's pixel size, so we must retarget remoteW/H to it too, or the mouse
+  // lands on the wrong spot after a switch.
+  selectMonitor(i) {
+    const mon = this.monitors[i];
+    if (!mon) return;
+    this.monitor = i;
+    this.remoteW = mon.w; this.remoteH = mon.h;
+    this.canvas.width = mon.w; this.canvas.height = mon.h;
+    this.sendCtrl({type: 'select_mon', mon: i});
+  }
   sendQuality(partial) {
     const scale = +this.el.querySelector('.q-scale').value;
     const fps = +this.el.querySelector('.q-fps').value;
