@@ -13,14 +13,15 @@
 ;     capture the screen and inject mouse/keyboard.
 ;
 ; The installer also adds a Windows Defender exclusion for the install folder
-; (unsigned remote-control exes trip Defender's false-positive heuristics) and
+; (unsigned remote-control exes trip Defender's false-positive heuristics),
 ; turns off the UAC "secure desktop" dimming so UAC prompts are clickable
-; remotely by the elevated agent.
+; remotely by the elevated agent, and stops the PC from sleeping on AC power so
+; it stays reachable (the display can still turn off).
 ;
 ; GitHub builds this for you (see .github/workflows/build.yml).
 
 #define AppName "CtrlFreak"
-#define AppVersion "3.0.1"
+#define AppVersion "3.0.2"
 #define DefaultHubWs "wss://hub.ctrlfreak.us/ws"
 #define DefaultHubWeb "https://hub.ctrlfreak.us/"
 
@@ -169,6 +170,16 @@ begin
      ' /v PromptOnSecureDesktop /t REG_DWORD /d 0 /f');
 end;
 
+// KeepAwake stops the PC from sleeping or hibernating while on AC power, so the
+// agent stays connected and the machine is always reachable. The display can
+// still turn off to save the panel. Battery power is left alone, so a laptop
+// still sleeps when it is unplugged.
+procedure KeepAwake();
+begin
+  Sh('powercfg /change standby-timeout-ac 0');
+  Sh('powercfg /change hibernate-timeout-ac 0');
+end;
+
 // CreateHelperTask registers the logon task that runs the agent (mode=helper)
 // elevated and in the user's session. Windows handles the elevation and the
 // session placement; that is what makes screen capture and input injection work.
@@ -208,6 +219,7 @@ begin
   WriteHostConfig();
   AddDefenderExclusion();
   DisableSecureDesktop();
+  KeepAwake();
   CreateHelperTask();
   InstallSupervisor();
   // Start the helper now so it works without waiting for a reboot/logon. The
