@@ -12,9 +12,11 @@ import android.view.View
 import android.view.inputmethod.InputMethodManager
 import android.widget.Button
 import android.widget.EditText
+import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import java.util.UUID
 import java.util.concurrent.Executors
@@ -40,11 +42,13 @@ class SessionActivity : AppCompatActivity(), SignalClient.Listener, WebRtcClient
     private var lastX = 0
     private var lastY = 0
     private var prevKbText = ""
+    private lateinit var hostId: String
+    private lateinit var hostName: String
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val hostId = intent.getStringExtra(EXTRA_HOST_ID) ?: run { finish(); return }
-        val hostName = intent.getStringExtra(EXTRA_HOST_NAME) ?: "Remote"
+        hostId = intent.getStringExtra(EXTRA_HOST_ID) ?: run { finish(); return }
+        hostName = intent.getStringExtra(EXTRA_HOST_NAME) ?: "Remote"
 
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -62,12 +66,26 @@ class SessionActivity : AppCompatActivity(), SignalClient.Listener, WebRtcClient
             text = "$hostName  ·  connecting"
             setTextColor(Color.parseColor("#8b949e")); textSize = 12f
         }
+        // Buttons live in a horizontal scroller so they never get cut off on the
+        // narrow cover screen, no matter how many there are.
+        val btnRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        btnRow.addView(btn("⌨") { toggleKeyboard() })                          // keyboard
+        btnRow.addView(btn("↻") { confirmCommand(Cmd.RESTART_AGENT) })         // restart agent
+        btnRow.addView(btn("⏻") { confirmCommand(Cmd.REBOOT) })               // reboot PC
+        btnRow.addView(btn("R-clk") { rightClick() })                          // right click
+        btnRow.addView(btn("Esc") { tap("Escape") })
+        btnRow.addView(btn("Win") { tap("MetaLeft") })
+        btnRow.addView(btn("×") { finish() })                                  // close
+        val btnScroll = HorizontalScrollView(this).apply {
+            isHorizontalScrollBarEnabled = false
+            addView(btnRow)
+        }
         bar.addView(status, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-        bar.addView(btn("⌨") { toggleKeyboard() })      // keyboard
-        bar.addView(btn("R-clk") { rightClick() })            // right click
-        bar.addView(btn("Esc") { tap("Escape") })
-        bar.addView(btn("Win") { tap("MetaLeft") })
-        bar.addView(btn("×") { finish() })               // close
+        bar.addView(btnScroll, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT))
 
         remote = RemoteView(this).apply { listener = this@SessionActivity }
 
@@ -156,6 +174,26 @@ class SessionActivity : AppCompatActivity(), SignalClient.Listener, WebRtcClient
 
     private fun tap(code: String) {
         client.key(code, true); client.key(code, false)
+    }
+
+    // Restart-agent and reboot, both behind a confirmation. Sent over the
+    // signaling link (like the device list) so they work even if the session is
+    // frozen.
+    private fun confirmCommand(cmd: String) {
+        val reboot = cmd == Cmd.REBOOT
+        val msg = if (reboot)
+            "Are you sure you want to reboot \"$hostName\"? It restarts in 10 seconds and open apps are force-closed. It will come back on its own."
+        else
+            "Are you sure you want to restart the CtrlFreak agent on \"$hostName\"? It bounces in a few seconds without rebooting the PC."
+        AlertDialog.Builder(this)
+            .setTitle(if (reboot) "Reboot PC" else "Restart CtrlFreak")
+            .setMessage(msg)
+            .setPositiveButton("Yes") { _, _ ->
+                SignalClient.send(Signal(type = Sig.COMMAND, hostId = hostId, command = cmd))
+                Toast.makeText(this, "Sent to $hostName.", Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
     }
 
     // ---- keyboard ----

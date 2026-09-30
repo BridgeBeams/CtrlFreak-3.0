@@ -7,7 +7,6 @@ import android.graphics.Color
 import android.graphics.Rect
 import android.util.AttributeSet
 import android.view.MotionEvent
-import android.view.ScaleGestureDetector
 import android.view.View
 import android.view.ViewConfiguration
 import kotlin.math.abs
@@ -23,8 +22,12 @@ import kotlin.math.hypot
  *                            two taps land a few pixels apart)
  *   - press and hold       = right click
  *   - drag (hold + move)   = left button drag
- *   - two-finger pinch     = zoom
+ *   - two-finger pinch     = zoom (anchored to the pinch point)
  *   - two-finger drag      = pan when zoomed in, mouse wheel scroll otherwise
+ *
+ * Zoom and pan are computed directly from the two finger positions (span and
+ * centroid) rather than a gesture detector, so panning is never swallowed by the
+ * pinch recognizer.
  */
 class RemoteView @JvmOverloads constructor(
     context: Context, attrs: AttributeSet? = null
@@ -51,7 +54,7 @@ class RemoteView @JvmOverloads constructor(
     private var panX = 0f
     private var panY = 0f
 
-    // Gesture state.
+    // One-finger gesture state.
     private var downVX = 0f
     private var downVY = 0f
     private var lastVX = 0f
@@ -63,39 +66,23 @@ class RemoteView @JvmOverloads constructor(
     private var lastTapTime = 0L
     private var lastTapVX = 0f
     private var lastTapVY = 0f
-    private var lastCx = 0f
-    private var lastCy = 0f
+
+    // Two-finger gesture state.
+    private var prevCx = 0f
+    private var prevCy = 0f
+    private var prevSpan = 0f
     private var scrollAnchorY = 0f
 
+    private val density = resources.displayMetrics.density
     private val slop = ViewConfiguration.get(context).scaledTouchSlop.toFloat()
-    private val doubleSlop = 40f * resources.displayMetrics.density
+    private val doubleSlop = 40f * density
+    private val pinchSlop = 14f * density
     private val longPress = Runnable {
         if (!moved && !dragging && !multi) {
             longPressed = true
             toRemote(downVX, downVY)?.let { listener?.onRightClick(it.first, it.second) }
         }
     }
-
-    private val scaleDetector = ScaleGestureDetector(context, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
-        override fun onScale(d: ScaleGestureDetector): Boolean {
-            val bmp = bitmap ?: return false
-            val sw = bmp.width.toFloat(); val sh = bmp.height.toFloat()
-            val vw = width.toFloat(); val vh = height.toFloat()
-            if (sw <= 0f || sh <= 0f || vw <= 0f || vh <= 0f) return false
-            val base = minOf(vw / sw, vh / sh)
-            // Keep the point under the fingers fixed as we zoom.
-            val iw0 = sw * base * zoom; val ih0 = sh * base * zoom
-            val ox0 = (vw - iw0) / 2f + panX; val oy0 = (vh - ih0) / 2f + panY
-            val fxFrac = (d.focusX - ox0) / iw0; val fyFrac = (d.focusY - oy0) / ih0
-            zoom = (zoom * d.scaleFactor).coerceIn(1f, 5f)
-            val iw1 = sw * base * zoom; val ih1 = sh * base * zoom
-            panX = d.focusX - fxFrac * iw1 - (vw - iw1) / 2f
-            panY = d.focusY - fyFrac * ih1 - (vh - ih1) / 2f
-            clampPan()
-            invalidate()
-            return true
-        }
-    })
 
     init {
         setBackgroundColor(Color.BLACK)
@@ -152,9 +139,33 @@ class RemoteView @JvmOverloads constructor(
 
     private fun cx(e: MotionEvent) = (e.getX(0) + e.getX(1)) / 2f
     private fun cy(e: MotionEvent) = (e.getY(0) + e.getY(1)) / 2f
+    private fun span(e: MotionEvent): Float {
+        if (e.pointerCount < 2) return 0f
+        val dx = (e.getX(0) - e.getX(1)).toDouble()
+        val dy = (e.getY(0) - e.getY(1)).toDouble()
+        return hypot(dx, dy).toFloat()
+    }
+
+    /** Change zoom by factor, keeping the point (fx,fy) fixed under the fingers. */
+    private fun zoomAround(fx: Float, fy: Float, factor: Float) {
+        val bmp = bitmap ?: return
+        val sw = bmp.width.toFloat(); val sh = bmp.height.toFloat()
+        val vw = width.toFloat(); val vh = height.toFloat()
+        if (sw <= 0f || sh <= 0f || vw <= 0f || vh <= 0f) return
+        val base = minOf(vw / sw, vh / sh)
+        val newZoom = (zoom * factor).coerceIn(1f, 5f)
+        if (newZoom == zoom) return
+        val real = newZoom / zoom
+        val iw0 = sw * base * zoom; val ih0 = sh * base * zoom
+        val ox0 = (vw - iw0) / 2f + panX; val oy0 = (vh - ih0) / 2f + panY
+        val nox = fx - real * (fx - ox0); val noy = fy - real * (fy - oy0)
+        zoom = newZoom
+        val iw1 = sw * base * zoom; val ih1 = sh * base * zoom
+        panX = nox - (vw - iw1) / 2f
+        panY = noy - (vh - ih1) / 2f
+    }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
-        scaleDetector.onTouchEvent(event)
         val l = listener ?: return false
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
@@ -166,19 +177,23 @@ class RemoteView @JvmOverloads constructor(
                 removeCallbacks(longPress)
                 if (dragging) { toRemote(lastVX, lastVY)?.let { l.onDragEnd(it.first, it.second) }; dragging = false }
                 multi = true
-                if (event.pointerCount >= 2) { lastCx = cx(event); lastCy = cy(event); scrollAnchorY = lastCy }
+                if (event.pointerCount >= 2) {
+                    prevCx = cx(event); prevCy = cy(event); prevSpan = span(event); scrollAnchorY = prevCy
+                }
             }
             MotionEvent.ACTION_MOVE -> {
                 if (multi) {
-                    if (event.pointerCount >= 2 && !scaleDetector.isInProgress) {
-                        val ccx = cx(event); val ccy = cy(event)
-                        val dx = ccx - lastCx; val dy = ccy - lastCy
-                        if (zoom > 1f) {
-                            panX += dx; panY += dy; clampPan(); invalidate()
-                        } else if (abs(ccy - scrollAnchorY) > 24f) {
-                            l.onScroll(if (ccy > scrollAnchorY) -1 else 1); scrollAnchorY = ccy
+                    if (event.pointerCount >= 2) {
+                        val ncx = cx(event); val ncy = cy(event); val nspan = span(event)
+                        val pinching = prevSpan > 0f && abs(nspan - prevSpan) > pinchSlop
+                        if (zoom > 1f || pinching) {
+                            if (prevSpan > 0f && nspan > 0f) zoomAround(ncx, ncy, nspan / prevSpan)
+                            panX += (ncx - prevCx); panY += (ncy - prevCy)
+                            clampPan(); invalidate()
+                        } else if (abs(ncy - scrollAnchorY) > 24f) {
+                            l.onScroll(if (ncy > scrollAnchorY) -1 else 1); scrollAnchorY = ncy
                         }
-                        lastCx = ccx; lastCy = ccy
+                        prevCx = ncx; prevCy = ncy; prevSpan = nspan
                     }
                 } else {
                     val dx = event.x - downVX; val dy = event.y - downVY
@@ -196,8 +211,9 @@ class RemoteView @JvmOverloads constructor(
                 }
             }
             MotionEvent.ACTION_POINTER_UP -> {
-                // Keep multi mode until the last finger lifts, so the finger that
-                // stays down does not fire a stray click or drag.
+                // If we drop back to one finger, re-seed for a possible continued
+                // single-finger gesture but stay in multi mode until full release,
+                // so the leftover finger does not fire a stray click.
             }
             MotionEvent.ACTION_UP -> {
                 removeCallbacks(longPress)
@@ -209,8 +225,6 @@ class RemoteView @JvmOverloads constructor(
                         val now = System.currentTimeMillis()
                         val near = hypot((downVX - lastTapVX).toDouble(), (downVY - lastTapVY).toDouble()) < doubleSlop
                         if (now - lastTapTime < 320L && near) {
-                            // Second tap of a double-tap: click again at the FIRST
-                            // tap's point so both clicks share one pixel.
                             toRemote(lastTapVX, lastTapVY)?.let { l.onLeftClick(it.first, it.second) }
                             lastTapTime = 0L
                         } else {
