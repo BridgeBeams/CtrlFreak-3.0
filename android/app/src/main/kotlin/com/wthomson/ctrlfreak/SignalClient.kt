@@ -30,12 +30,29 @@ object SignalClient {
     private var token: String = ""
     private var wantOpen = false
 
+    // Cached state so a screen that gets rebuilt (e.g. the Fold cover<->main
+    // switch, or a rotation) can show the live device list immediately instead
+    // of resetting to "Connecting..." with nothing. Touched only on the main
+    // thread.
+    private var connected = false
+    private val deviceCache = LinkedHashMap<String, DeviceInfo>()
+
     var clientId: String = ""
         private set
     var iceServers: List<IceServer> = emptyList()
         private set
 
-    fun addListener(l: Listener) = listeners.add(l)
+    fun addListener(l: Listener) {
+        listeners.add(l)
+        // Replay current state to the newcomer.
+        main.post {
+            if (connected) l.onConnected()
+            if (deviceCache.isNotEmpty()) {
+                l.onSignal(Signal(type = Sig.DEVICE_LIST, devices = deviceCache.values.toList()))
+            }
+        }
+    }
+
     fun removeListener(l: Listener) = listeners.remove(l)
 
     val isOpen: Boolean get() = ws != null
@@ -80,6 +97,19 @@ object SignalClient {
                     sig.iceServers?.let { iceServers = it }
                 }
                 main.post {
+                    when (sig.type) {
+                        Sig.WELCOME -> connected = true
+                        Sig.DEVICE_LIST -> {
+                            deviceCache.clear()
+                            sig.devices?.forEach { deviceCache[it.id] = it }
+                        }
+                        Sig.DEVICE_EVENT -> {
+                            val d = sig.device
+                            if (d != null) {
+                                if (sig.online) deviceCache[d.id] = d else deviceCache.remove(d.id)
+                            }
+                        }
+                    }
                     if (sig.type == Sig.WELCOME) listeners.forEach { it.onConnected() }
                     listeners.forEach { it.onSignal(sig) }
                 }
@@ -87,13 +117,13 @@ object SignalClient {
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                 ws = null
-                main.post { listeners.forEach { it.onDisconnected(t.message ?: "connection failed") } }
+                main.post { connected = false; listeners.forEach { it.onDisconnected(t.message ?: "connection failed") } }
                 scheduleReconnect()
             }
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
                 ws = null
-                main.post { listeners.forEach { it.onDisconnected(reason) } }
+                main.post { connected = false; listeners.forEach { it.onDisconnected(reason) } }
                 if (wantOpen) scheduleReconnect()
             }
         })
